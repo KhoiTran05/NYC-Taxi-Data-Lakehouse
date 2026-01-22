@@ -105,7 +105,7 @@ class TaxiDataGenerator:
         
         vendor_id = random.choice([1, 2, 6, 7])
         passenger_count = random.randint(1, 4)
-        payment_type = random.choices([1, 2, 3, 4], weights=[0.4, 0.4, 0.1, 0.1])[0]
+        payment_type = random.choices([1, 2, 3, 4, 5, 6], weights=[0.4, 0.4, 0.1, 0.05, 0.03, 0.02])[0]
         
         base_fare = 2.50
         per_mile_rate = 2.50
@@ -153,7 +153,7 @@ class TaxiDataGenerator:
                 %(vendor_id)s, %(pickup_datetime)s, %(dropoff_datetime)s, %(passenger_count)s,
                 %(trip_distance)s, %(pu_location_id)s, %(do_location_id)s, %(payment_type)s,
                 %(fare_amount)s, %(extra)s, %(mta_tax)s, %(tip_amount)s, %(tolls_amount)s, %(total_amount)s
-            )"""
+            ) RETURNING id"""
             
             self.cursor.execute(query, record)
             self.conn.commit()
@@ -200,7 +200,7 @@ class TaxiDataGenerator:
                 SELECT id FROM taxi.trips
                 ORDER BY created_at DESC
                 LIMIT %s
-            """, (num_updates,))
+            """, [int(num_updates)])
             
             trip_ids = [row[0] for row in self.cursor.fetchall()]
             
@@ -259,7 +259,7 @@ def main():
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt")
     except Exception as e:
-        logger.error(f"Error during data generation: {e}")
+        logger.exception(f"Error during data generation: {e}")
     finally:
         data_generator.close_connection()
         

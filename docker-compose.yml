@@ -105,6 +105,23 @@ services:
       KAFKA_REST_LISTENERS: "http://0.0.0.0:8082"
       KAFKA_REST_SCHEMA_REGISTRY_URL: 'http://schema-registry:8081'
 
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    hostname: kafka-ui
+    container_name: kafka-ui
+    depends_on:
+      - broker
+      - schema-registry
+    ports:
+      - "8086:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: broker:29092
+      KAFKA_CLUSTERS_0_JMXPORT: 9101
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: connect
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://connect:8083
+
   schema-registry:
     image: confluentinc/cp-schema-registry:7.9.0
     hostname: schema-registry
@@ -180,7 +197,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/taxi_db
       BATCH_SIZE: 100
-      INTERVAL_SECONDS: 10
+      INTERVAL_SECONDS: 60
     volumes:
       - ./data:/app/data
 
@@ -282,6 +299,8 @@ services:
     volumes:
       - ./data:/opt/spark/data
       - ./spark_jobs:/opt/spark-apps
+      - ./spark-defaults.cfg:/opt/spark/conf/spark-defaults.conf
+      - ./ivy2:/home/spark/.ivy2
     ports:
       - "7077:7077"
       - "8080:8080"
