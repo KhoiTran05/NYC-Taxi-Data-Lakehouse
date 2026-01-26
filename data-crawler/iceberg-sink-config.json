@@ -1,7 +1,7 @@
 {
     "name": "iceberg-sink-connector",
     "config": {
-        "connector.class": "org.apache.iceberg.kafka.connect.IcebergSinkConnector",
+        "connector.class": "org.apache.iceberg.connect.IcebergSinkConnector",
         "task.max": "1",
         "topics": "lakehouse.trips, lakehouse.payment_types, lakehouse.vendors",
 

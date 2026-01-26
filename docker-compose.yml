@@ -318,6 +318,9 @@ services:
       - SPARK_WORKER_WEBUI_PORT=8084
     volumes:
       - ./data:/opt/spark/data
+      - ./spark_jobs:/opt/spark-apps
+      - ./spark-defaults.cfg:/opt/spark/conf/spark-defaults.conf
+      - ./ivy2:/home/spark/.ivy2
     ports:
       - "7078:7078"
       - "8084:8084"
