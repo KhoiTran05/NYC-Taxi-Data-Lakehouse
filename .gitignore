@@ -225,3 +225,7 @@ data/processed/*
 .env.*.local
 
 ivy2
+
+data/
+
+TODO

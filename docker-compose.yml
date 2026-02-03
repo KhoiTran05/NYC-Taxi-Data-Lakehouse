@@ -14,14 +14,13 @@ x-airflow-common:
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     AIRFLOW__WEBSERVER__SECRET_KEY: 'your-secret-key-here'
+    AIRFLOW_CONN_SPARK_DEFAULT: '{"conn_type": "spark", "host": "spark-master", "port": 7077, "extra": {"queue": "root.default"}}'
     PATH: "/home/airflow/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/config:/opt/airflow/config
     - ./airflow/plugins:/opt/airflow/plugins
-    - ./spark_jobs:/opt/spark/jobs
-    - ./data:/opt/data
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on: &airflow-common-depends-on
     postgres-airflow: 
@@ -233,7 +232,7 @@ services:
     <<: *airflow-common
     command: webserver
     ports:
-      - "8085:8085"
+      - "8085:8080"
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8085/health"]
       interval: 30s
@@ -251,6 +250,7 @@ services:
       - ./airflow/config:/opt/airflow/config
       - ./airflow/plugins:/opt/airflow/plugins
       - ./data:/opt/airflow/data
+      - ./spark_jobs:/opt/airflow/spark_jobs
 
   # Airflow Scheduler
   airflow-scheduler:
@@ -273,6 +273,7 @@ services:
       - ./airflow/config:/opt/airflow/config
       - ./airflow/plugins:/opt/airflow/plugins
       - ./data:/opt/airflow/data
+      - ./spark_jobs:/opt/airflow/spark_jobs
 
   # Airflow Init
   airflow-init:

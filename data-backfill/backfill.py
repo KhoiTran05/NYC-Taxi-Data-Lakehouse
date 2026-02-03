@@ -15,7 +15,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class DataBackfillProccessor:
-    def __init__(self, data_dir="data"):
+    def __init__(self, data_dir="data/taxi/backfill"):
         self.db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/taxi_db")
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(exist_ok=True)
@@ -29,7 +29,7 @@ class DataBackfillProccessor:
         
         local_file_path = self.data_dir / file_name
         if local_file_path.exists():
-            print(f"File {file_name} already exists locally.")
+            logger.info(f"File {file_name} already exists locally.")
             return local_file_path
         
         try:
@@ -44,6 +44,7 @@ class DataBackfillProccessor:
                 stream=True,
                 timeout=60
             )
+            response.raise_for_status()
             
             downloaded = 0
             with open(local_file_path, "wb") as f:
@@ -192,7 +193,7 @@ def main():
     
     try:
         processor = DataBackfillProccessor(data_dir="data")
-        file_paths = processor.get_multiple_taxi_data(2025, 1, 2025, 12)
+        file_paths = processor.get_multiple_taxi_data(2025, 1, 2025, 11)
         
         if not file_paths:
             logger.warning("No files downloaded, exiting process")
