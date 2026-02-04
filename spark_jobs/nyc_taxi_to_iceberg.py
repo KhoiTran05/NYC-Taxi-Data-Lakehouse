@@ -174,42 +174,85 @@ def insert_aggregated_tables(spark):
     """Insert into aggregated tables in Iceberg"""
     logger.info("Working on nessie.nyc_taxi.monthly_summary")
     
-    merge_query = """
-        MERGE INTO nessie.nyc_taxi.monthly_summary t
-        USING (
-            SELECT
-                year,
-                month,
-                COUNT(*) AS total_trips,
-                SUM(total_amount) AS total_amount,
-                SUM(passenger_count) AS total_passengers,
-                AVG(trip_distance) AS avg_trip_distance,
-                AVG(fare_amount) AS avg_fare_amount,
-                AVG(tip_amount) AS avg_tip_amount,
-                MAX(loaded_at) AS last_updated
-            FROM nessie.nyc_taxi.trips
-            WHERE 
-                year = year(current_date()) 
-                AND month = month(current_date())
-            GROUP BY year, month
-        ) s 
-        ON t.year = s.year AND t.month = s.month
-        WHEN MATCHED THEN UPDATE SET *
-        WHEN NOT MATCHED THEN INSERT *
+    mode = spark.conf.get("spark.pipeline.mode", "backfill")
+    
+    if mode == "backfill":
+        merge_query = f"""
+            MERGE INTO nessie.nyc_taxi.monthly_summary t
+            USING (
+                SELECT
+                    year,
+                    month,
+                    COUNT(*) AS total_trips,
+                    ROUND(SUM(total_amount), 2) AS total_amount,
+                    SUM(passenger_count) AS total_passengers,
+                    ROUND(AVG(trip_distance), 2) AS avg_trip_distance,
+                    ROUND(AVG(fare_amount), 2) AS avg_fare_amount,
+                    ROUND(AVG(tip_amount), 2) AS avg_tip_amount,
+                    MAX(loaded_at) AS last_updated
+                FROM nessie.nyc_taxi.trips
+                WHERE 
+                    year = 2025
+                    AND month BETWEEN 1 AND 11
+                GROUP BY year, month
+            ) s 
+            ON t.year = s.year AND t.month = s.month
+            WHEN MATCHED THEN UPDATE SET *
+            WHEN NOT MATCHED THEN INSERT *
+        """
+    else:
+        year = int(sys.argv[2])
+        month = int(sys.argv[3])
+        
+        merge_query = f"""
+            MERGE INTO nessie.nyc_taxi.monthly_summary t
+            USING (
+                SELECT
+                    year,
+                    month,
+                    COUNT(*) AS total_trips,
+                    ROUND(SUM(total_amount), 2) AS total_amount,
+                    SUM(passenger_count) AS total_passengers,
+                    ROUND(AVG(trip_distance), 2) AS avg_trip_distance,
+                    ROUND(AVG(fare_amount), 2) AS avg_fare_amount,
+                    ROUND(AVG(tip_amount), 2) AS avg_tip_amount,
+                    MAX(loaded_at) AS last_updated
+                FROM nessie.nyc_taxi.trips
+                WHERE 
+                    year = {year}
+                    AND month = {month}
+                GROUP BY year, month
+            ) s 
+            ON t.year = s.year AND t.month = s.month
+            WHEN MATCHED THEN UPDATE SET *
+            WHEN NOT MATCHED THEN INSERT *
         """
     
     try:
-        spark.sql(merge_query)
+        spark.sql(merge_query)        
         logger.info("Merging successfully into 'nessie.nyc_taxi.monthly_summary'")
     except Exception as e:
         logger.exception(f"Error during merging into 'nessie.nyc_taxi.monthly_summary': {e}")
         raise
     
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: spark_job.py <input_parquet_path>")
-        sys.exit(1)
-        
+    summary_stat = f"""
+        SELECT 
+            year, 
+            month, 
+            COUNT(*) cnt
+        FROM nessie.nyc_taxi.trips
+        GROUP BY year, month
+        ORDER BY year, month
+    """
+    
+    try:
+        df_stat = spark.sql(summary_stat)
+        logger.info("Monthly trip stats:")
+        df_stat.show(truncate=False)
+    except Exception as e:
+        logger.warning(f"Error during stat query execution: {e}")
+    
+def main():        
     input_path = sys.argv[1]
     spark = create_spark_session()
     spark.sparkContext.setLogLevel("WARN")

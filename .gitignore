@@ -229,3 +229,5 @@ ivy2
 data/
 
 TODO
+
+airflow/logs
