@@ -47,7 +47,7 @@ def create_spark_session():
 
 def create_iceberg_table(spark):
     """Create Iceberg table if it does not exist"""
-    logger.info("Creating taxi namespace")
+    logger.info("Creating 'taxi' namespace")
     try:
         spark.sql("CREATE NAMESPACE IF NOT EXISTS nessie.nyc_taxi")
         logger.info("Namespace created successfully")
@@ -112,7 +112,7 @@ def create_iceberg_table(spark):
         logger.exception(f"Error during creating 'nessie.nyc_taxi.monthly_summary': {e}")
         raise
     
-def to_iceberg(spark, input_path):
+def process_trips_data(spark, input_path):
     """Transform backfilled data to iceberg"""
     try:
         df = spark.read.parquet(input_path)
@@ -260,7 +260,7 @@ def main():
     try:
         create_iceberg_table(spark)
         
-        to_iceberg(spark, input_path)
+        process_trips_data(spark, input_path)
         
         insert_aggregated_tables(spark)
 

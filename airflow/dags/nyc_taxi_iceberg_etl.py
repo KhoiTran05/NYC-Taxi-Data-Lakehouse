@@ -26,7 +26,7 @@ default_args = {
     "email_on_failure": False,
     "email_on_retry": False,
     "retries": 1,
-    "retry_delay": timedelta(minutes=5)
+    "retry_delay": timedelta(minutes=3)
 }
 
 dag = DAG(
@@ -170,6 +170,7 @@ def download_or_mock_monthly_taxi_data(**context):
     context["ti"].xcom_push(key="raw_data_path", value=s3_path)
     
 def validate_data(**context):
+    """Validate taxi data"""
     ti = context["task_instance"]
     s3_path = ti.xcom_pull(
         task_ids="download_monthly_data",
@@ -193,9 +194,12 @@ def validate_data(**context):
 
     df = pd.read_parquet(local_path)
                          
-    assert len(df) > 0, "Dataset is empty"
-    assert 'tpep_pickup_datetime' in df.columns, "Missing pickup datetime column"
-    assert 'tpep_dropoff_datetime' in df.columns, "Missing dropoff datetime column"
+    if len(df) == 0:
+        raise ValueError("Dataset is empty")
+    if 'tpep_pickup_datetime' not in df.columns:
+        raise ValueError("Missing pickup datetime column")
+    if 'tpep_dropoff_datetime' not in df.columns:
+        raise ValueError("Missing dropoff datetime column")
     
     null_percentage = df.isnull().sum() / len(df) * 100
     logger.info("Null percentage by column:\n%s", null_percentage)
