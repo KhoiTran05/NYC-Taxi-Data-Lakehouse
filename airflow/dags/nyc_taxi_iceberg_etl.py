@@ -221,6 +221,7 @@ def choose_path():
 def mark_backfill_done():
     Variable.set("backfill_done", "true")
     
+    
 branch = BranchPythonOperator(
     task_id="branch_backfill_or_monthly",
     python_callable=choose_path    

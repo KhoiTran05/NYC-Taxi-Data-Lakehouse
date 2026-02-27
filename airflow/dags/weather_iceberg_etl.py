@@ -1,5 +1,8 @@
 from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
+from datetime import datetime, timedelta
+from airflow.models import Variable
 from datetime import datetime, timedelta
 from pathlib import Path
 import requests
@@ -7,6 +10,8 @@ import os
 import boto3
 import json
 import logging
+import tempfile
+import pandas as pd
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,18 +43,18 @@ def get_weather_data(**context):
     api_key = os.getenv("OPENWEATHER_API_KEY")
     
     batch_start_date = context["data_interval_start"]
+    batch_end_date = context["data_interval_end"]
     year = batch_start_date.year
     month = batch_start_date.month 
     
-    url = "https://history.openweathermap.org/data/2.5/history/city"
+    url = "https://archive-api.open-meteo.com/v1/archive"
     file_name = f"weather_{year}-{month:02d}.json"
     request_params = {
-        "lat": 40.71,
-        "lon": -74.00,
-        "type": "hour",
-        "appid": api_key,
-        "start": int(context["data_interval_start"].timestamp()),
-        "end": int(context["data_interval_end"].timestamp())
+        "latitude": 40.7143,
+        "longitude": -74.006,
+        "start_date": batch_start_date.strftime("%Y-%m-%d"),
+        "end_date": batch_end_date.strftime("%Y-%m-%d"),
+        "hourly": "temperature_2m,relative_humidity_2m,rain,wind_speed_10m,surface_pressure",
     }
     
     bucket = "data-lake"
@@ -140,13 +145,86 @@ def mock_location_data(**context):
     
     context["ti"].xcom_push(key="location_data_path", value=s3_path)
     
-    
 def validate_data(**context):
     "Validate weather data"
-    weather_data_path = context["ti"].xcom_pull(task_ids="fetch_weather_data", key="weather_data_path")
+    weather_s3_path = context["ti"].xcom_pull(task_ids="fetch_weather_data", key="weather_data_path")
     
+    bucket, key = weather_s3_path.replace("s3a://", "").split("/", 1)
+
+    s3 = boto3.client(
+        "s3",
+        endpoint_url="http://minio:9000",
+        aws_access_key_id="admin",
+        aws_secret_access_key="password",
+        region_name="us-east-1",
+    )
     
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        local_path = f.name
+        
+    s3.download_file(bucket, key, local_path)
     
+    df = pd.read_json(local_path)
+    
+    cols = df.columns
+    if len(df) == 0:
+        raise ValueError("Dataset is empty")
+    if 'temperature_2m' not in cols:
+        raise ValueError("Missing 'temperature_2m' column")
+    if 'relative_humidity_2m' not in cols:
+        raise ValueError("Missing 'relative_humidity_2m' column")
+    if 'rain' not in cols:
+        raise ValueError("Missing 'rain' column")
+    if 'wind_speed_10m' not in cols:
+        raise ValueError("Missing 'rain' column")
+    if 'surface_pressure' not in cols:
+        raise ValueError("Missing 'surface_pressure' column")
+    
+    null_percentage = df.isnull().sum() / len(df) * 100
+    logger.info("Null percentage by column:\n%s", null_percentage)
+
+    logger.info(
+        "Dataset validation passed. %d records ready for processing.",
+        len(df)
+    )
+
+    context["task_instance"].xcom_push(key="validated_data_path", value=weather_s3_path)
+    
+def choose_branch():
+    if Variable.get("init_done", default_var="false") != "true":
+        Variable.set("init_done", "true")
+        return "get_location_data"
+    return "fetch_weather_data"
+
+
+branch = BranchPythonOperator(
+    task_id="branch_init",
+    python_callable=choose_branch
+)
+
+get_location_task = PythonOperator(
+    task_id="get_location_data",
+    python_callable=mock_location_data,
+    dag=dag
+)
+
+location_etl_task = SparkSubmitOperator(
+    task_id="location_etl",
+    application="/opt/airflow/spark_jobs/location_to_iceberg.py",
+    conn_id="spark_default",
+    deploy_mode="client",
+    application_args=[
+        "{{ ti.xcom_pull(task_ids='get_location_data', key='location_data_path') }}"
+    ],
+    packages=("org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.8.1,"
+              "org.apache.iceberg:iceberg-aws-bundle:1.8.1,"
+              "org.projectnessie.nessie-integrations:nessie-spark-extensions-3.5_2.12:0.77.1,"
+              "org.apache.hadoop:hadoop-aws:3.3.4,"
+              "com.amazonaws:aws-java-sdk-bundle:1.12.262"),
+    verbose=True,
+    dag=dag
+)
+
 fetch_weather_task = PythonOperator(
     task_id="fetch_weather_data",
     python_callable=get_weather_data,
@@ -158,3 +236,23 @@ validate_weather_task = PythonOperator(
     python_callable=validate_data,
     dag=dag
 )
+
+weather_etl_task = SparkSubmitOperator(
+    task_id="weather_etl",
+    application="/opt/airflow/spark_jobs/weather_to_iceberg.py",
+    conn_id="spark_default",
+    deploy_mode="client",
+    application_args=[
+        "{{ ti.xcom_pull(task_ids='validate_weather_data', key='validated_data_path') }}"
+    ],
+    packages=("org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.8.1,"
+              "org.apache.iceberg:iceberg-aws-bundle:1.8.1,"
+              "org.projectnessie.nessie-integrations:nessie-spark-extensions-3.5_2.12:0.77.1,"
+              "org.apache.hadoop:hadoop-aws:3.3.4,"
+              "com.amazonaws:aws-java-sdk-bundle:1.12.262"),
+    verbose=True,
+    dag=dag
+)
+
+branch >> get_location_task >> location_etl_task
+branch >> fetch_weather_task >> validate_weather_task >> weather_etl_task
