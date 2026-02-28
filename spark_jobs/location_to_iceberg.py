@@ -49,7 +49,7 @@ def create_iceberg_table(spark):
     """Create Iceberg table"""
     logger.info("Creating 'reference' namespace")
     try:
-        spark.sql("CREATING NAMESPACE IF NOT EXISTS nessie.reference")
+        spark.sql("CREATE NAMESPACE IF NOT EXISTS nessie.reference")
         logger.info("Namespace 'nessie.reference' created successfully")
     except Exception:
         logger.exception("Error during creating 'nessie.reference' namespace")
@@ -84,7 +84,7 @@ def create_iceberg_table(spark):
 def process_location_data(spark, input_path):
     """Transform location data to Iceberg"""
     try:
-        df = spark.read.json(input_path)
+        df = spark.read.option("multiline", "true").json(input_path)
         logger.info(f"Successfully read {df.count()} records from {input_path}")
     except Exception as e:
         logger.exception(f"Failed to read json from {input_path}: {e}")

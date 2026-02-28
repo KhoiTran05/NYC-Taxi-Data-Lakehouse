@@ -43,7 +43,7 @@ def get_weather_data(**context):
     api_key = os.getenv("OPENWEATHER_API_KEY")
     
     batch_start_date = context["data_interval_start"]
-    batch_end_date = context["data_interval_end"]
+    batch_end_date = context["data_interval_end"] - timedelta(days=1)
     year = batch_start_date.year
     month = batch_start_date.month 
     
@@ -55,6 +55,7 @@ def get_weather_data(**context):
         "start_date": batch_start_date.strftime("%Y-%m-%d"),
         "end_date": batch_end_date.strftime("%Y-%m-%d"),
         "hourly": "temperature_2m,relative_humidity_2m,rain,wind_speed_10m,surface_pressure",
+        "timezone": "America/New_York"
     }
     
     bucket = "data-lake"
@@ -125,7 +126,7 @@ def mock_location_data(**context):
         zone['is_business_district'] = zone['zone'] in ['Financial District', 'Midtown East', 'Midtown West']
         zone['created_at'] = datetime.now().isoformat()
         
-    with open(local_dir, "w", encoding="utf-8") as f:
+    with open(local_path, "w", encoding="utf-8") as f:
         json.dump(zones, f, ensure_ascii=False, indent=2)
         
     bucket = "data-lake"
@@ -140,7 +141,7 @@ def mock_location_data(**context):
         region_name="us-east-1",
     )
     
-    s3.uploadFile(str(local_path), "data-lake", s3_key)
+    s3.upload_file(str(local_path), "data-lake", s3_key)
     logger.info(f"Uploaded location data to {s3_path}")
     
     context["ti"].xcom_push(key="location_data_path", value=s3_path)
@@ -164,38 +165,64 @@ def validate_data(**context):
         
     s3.download_file(bucket, key, local_path)
     
-    df = pd.read_json(local_path)
+    with open(local_path, "r") as f:
+            raw = json.load(f)
     
-    cols = df.columns
-    if len(df) == 0:
+    if not raw:
         raise ValueError("Dataset is empty")
-    if 'temperature_2m' not in cols:
-        raise ValueError("Missing 'temperature_2m' column")
-    if 'relative_humidity_2m' not in cols:
-        raise ValueError("Missing 'relative_humidity_2m' column")
-    if 'rain' not in cols:
-        raise ValueError("Missing 'rain' column")
-    if 'wind_speed_10m' not in cols:
-        raise ValueError("Missing 'rain' column")
-    if 'surface_pressure' not in cols:
-        raise ValueError("Missing 'surface_pressure' column")
+
+    if "hourly" not in raw:
+        raise ValueError("Missing 'hourly' key")
+
+    if not isinstance(raw["hourly"], dict):
+        raise ValueError(f"Expected 'hourly' to be a dict, got {type(raw['hourly'])}")
+
+    hourly_df = pd.DataFrame(raw["hourly"])
     
-    null_percentage = df.isnull().sum() / len(df) * 100
+    if hourly_df.empty:
+        raise ValueError("Hourly dataset is empty")
+    
+    required_cols = [
+        "time",
+        "temperature_2m",
+        "relative_humidity_2m",
+        "rain",
+        "wind_speed_10m",
+        "surface_pressure"
+    ]
+
+    missing = [c for c in required_cols if c not in hourly_df.columns]
+    if missing:
+        raise ValueError(f"Missing columns: {missing}")
+    
+    null_counts = hourly_df[required_cols].isnull().sum()
+    null_percentage = null_counts / len(hourly_df) * 100
     logger.info("Null percentage by column:\n%s", null_percentage)
 
-    logger.info(
-        "Dataset validation passed. %d records ready for processing.",
-        len(df)
-    )
+    cols_with_nulls = null_counts[null_counts > 0].to_dict()
+    if cols_with_nulls:
+        raise ValueError(f"Null values detected: {cols_with_nulls}")
 
     context["task_instance"].xcom_push(key="validated_data_path", value=weather_s3_path)
     
 def choose_branch():
-    if Variable.get("init_done", default_var="false") != "true":
-        Variable.set("init_done", "true")
-        return "get_location_data"
-    return "fetch_weather_data"
+    s3 = boto3.client(
+        "s3",
+        endpoint_url="http://minio:9000",
+        aws_access_key_id="admin",
+        aws_secret_access_key="password",
+        region_name="us-east-1",
+    )
+    bucket = "data-lake"
+    prefix = "data/location/"
+    
+    response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=1)
+    location_exists = response.get("KeyCount", 0) > 0
 
+    if location_exists:
+        return ["fetch_weather_data"]
+    else:
+        return ["get_location_data", "fetch_weather_data"]
 
 branch = BranchPythonOperator(
     task_id="branch_init",

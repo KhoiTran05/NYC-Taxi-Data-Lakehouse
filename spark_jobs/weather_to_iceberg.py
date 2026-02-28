@@ -57,13 +57,12 @@ def create_iceberg_table(spark):
     hourly_weather_ddl = """
         CREATE TABLE IF NOT EXISTS nessie.weather.hourly_weather (
             timestamp TIMESTAMP,
-            temperature_celcius DOUBLE,
+            temperature_celsius DOUBLE,
             temperature_fahrenheit DOUBLE,
             humidity_percent INT,
             pressure_hpa DOUBLE,
             wind_speed_kmh DOUBLE,
             rain_mm DOUBLE,
-            weather_condition STRING,
             loaded_at TIMESTAMP,
             hour INT,
             day_of_week INT,
@@ -72,7 +71,7 @@ def create_iceberg_table(spark):
             month INT,
             day INT
         ) USING ICEBERG 
-        PARTITINED BY (year, month, day)
+        PARTITIONED BY (year, month, day)
         TBLPROPERTIES (
             "write.format.default" = "parquet",
             "write.parquet.compression-codec" = "zstd"
@@ -89,35 +88,44 @@ def create_iceberg_table(spark):
 def process_weather_data(spark, input_path):
     """Transform weather data to Iceberg"""
     try:
-        df = spark.read.parquet(input_path)
-        logger.info(f"Successfully read {df.count()} records from {input_path}")
+        df = spark.read.option("multiline", "true").json(input_path)
+        logger.info(f"Successfully read data from {input_path}")
     except Exception as e:
-        logger.exception(f"Failed to read parquet from {input_path}: {e}")
+        logger.exception(f"Failed to read json from {input_path}: {e}")
         raise
     
-    cleaned_df = df.select(explode("list").alias("item")) \
-        .select(
-            col("item.dt"),
-            round(col("item.main.temp") - 273.15, 2).alias("temperature_celcius"),
-            col("item.main.humidity").alias("humidity_percent"),
-            round(col("item.main.pressure"), 2).alias("pressure_hpa"),
-            round(col("item.wind.speed"), 2).alias("wind_speed_ms"),
-            round(col("item.rain.1h"), 2).alias("rain_mm"),
-            col("item.weather[0].main").alias("weather_condition"),
+    df = df.select("hourly.*")
+    
+    cleaned_df = df.select(
+            explode(
+                arrays_zip(
+                    "time",
+                    "temperature_2m",
+                    "relative_humidity_2m",
+                    "rain",
+                    "wind_speed_10m",
+                    "surface_pressure"
+                )
+            ).alias("item")
         ) \
-        .filter(col("temperature_celcius").isNotNull()) \
+        .select(
+            to_timestamp(col("item.time"), "yyyy-MM-dd'T'HH:mm").alias("timestamp"),
+            round(col("item.temperature_2m"), 2).alias("temperature_celsius"),
+            round(col("item.temperature_2m") * 9/5 + 32, 2).alias("temperature_fahrenheit"),
+            col("item.relative_humidity_2m").alias("humidity_percent"),
+            round(col("item.surface_pressure"), 2).alias("pressure_hpa"),
+            round(col("item.wind_speed_10m"), 2).alias("wind_speed_kmh"),
+            round(col("item.rain"), 2).alias("rain_mm")
+        ) \
+        .filter(col("temperature_celsius").isNotNull()) \
         .filter(col("humidity_percent").isNotNull()) \
         .filter(col("pressure_hpa").isNotNull()) \
-        .filter(col("wind_speed_ms").isNotNull()) \
+        .filter(col("wind_speed_kmh").isNotNull()) \
+        .filter(col("rain_mm").isNotNull()) \
+        .filter(col("timestamp").isNotNull()) \
         .dropDuplicates()
         
     processed_df = cleaned_df \
-        .withColumn(
-            "timestamp",
-            from_utc_timestamp(from_unixtime(col("dt")), "America/New_York")
-        ) \
-        .withColumn("wind_speed_kmh", round(col("wind_speed_ms") * 3.6, 2)) \
-        .withColumn("temperature_fahrenheit", round((col("temperature_celcius") * 9/5) + 32, 2)) \
         .withColumn("loaded_at", current_timestamp()) \
         .withColumn("hour", hour(col("timestamp"))) \
         .withColumn("day_of_week", dayofweek(col("timestamp"))) \
@@ -128,13 +136,12 @@ def process_weather_data(spark, input_path):
     
     result_df = processed_df.select(
         "timestamp",
-        "temperature_celcius",
+        "temperature_celsius",
         "temperature_fahrenheit",
         "humidity_percent",
         "pressure_hpa",
         "wind_speed_kmh",
         "rain_mm",
-        "weather_condition",
         "loaded_at",
         "hour",
         "day_of_week",
