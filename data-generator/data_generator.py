@@ -238,7 +238,7 @@ class TaxiDataGenerator:
 def main():
     """Main function to run the data generator"""
     database_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/taxi_db")
-    interval_seconds = os.getenv("INTERVAL_SECONDS", 30)
+    interval_seconds = int(os.getenv("INTERVAL_SECONDS", 30))
     
     logger.info(f"Starting data generator with interval {interval_seconds} seconds")
     data_generator = TaxiDataGenerator(database_url)
@@ -255,11 +255,11 @@ def main():
             if iteration % 5 == 0:
                 data_generator.updates()
                 
-            time.sleep(interval_seconds)
+            time.sleep(60)
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt")
-    except Exception as e:
-        logger.exception(f"Error during data generation: {e}")
+    except Exception:
+        logger.exception(f"Error during data generation")
     finally:
         data_generator.close_connection()
         

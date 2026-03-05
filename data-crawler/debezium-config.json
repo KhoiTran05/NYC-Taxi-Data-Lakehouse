@@ -19,14 +19,34 @@
         "key.converter.schemas.enable": "false",
         "value.converter.schemas.enable": "false",
 
-        "transforms": "route",
+        "transforms": "route,convertPickup,convertDropoff,convertCreatedAt,convertUpdatedAt",
         "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
         "transforms.route.regex": "([^.]+)\\.([^.]+)\\.([^.]+)",
         "transforms.route.replacement": "lakehouse.$3",
 
+        "transforms.convertPickup.type": "org.apache.kafka.connect.transforms.TimestampConverter$Value",
+        "transforms.convertPickup.field": "pickup_datetime",
+        "transforms.convertPickup.target.type": "string",
+        "transforms.convertPickup.format": "yyyy-MM-dd'T'HH:mm:ss'Z'",
+
+        "transforms.convertDropoff.type": "org.apache.kafka.connect.transforms.TimestampConverter$Value",
+        "transforms.convertDropoff.field": "dropoff_datetime",
+        "transforms.convertDropoff.target.type": "string",
+        "transforms.convertDropoff.format": "yyyy-MM-dd'T'HH:mm:ss'Z'",
+
+        "transforms.convertCreatedAt.type": "org.apache.kafka.connect.transforms.TimestampConverter$Value",
+        "transforms.convertCreatedAt.field": "created_at",
+        "transforms.convertCreatedAt.target.type": "string",
+        "transforms.convertCreatedAt.format": "yyyy-MM-dd'T'HH:mm:ss'Z'",
+
+        "transforms.convertUpdatedAt.type": "org.apache.kafka.connect.transforms.TimestampConverter$Value",
+        "transforms.convertUpdatedAt.field": "updated_at",
+        "transforms.convertUpdatedAt.target.type": "string",
+        "transforms.convertUpdatedAt.format": "yyyy-MM-dd'T'HH:mm:ss'Z'",
+
         "snapshot.mode": "initial",
         "decimal.handling.mode": "double",
-        "time.precision.mode": "adaptive",
+        "time.precision.mode": "connect",
         "include.schema.changes": "true",
         "tombstones.on.delete": "false",
         "max.batch.size": "2048",

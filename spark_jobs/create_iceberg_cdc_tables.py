@@ -58,8 +58,8 @@ def create_tables(spark):
     CREATE TABLE IF NOT EXISTS nessie.taxi_cdc.trips (
         id BIGINT,
         vendor_id INT,
-        pickup_datetime TIMESTAMP,
-        dropoff_datetime TIMESTAMP,
+        pickup_datetime BIGINT,
+        dropoff_datetime BIGINT,
         passenger_count INT,
         trip_distance DECIMAL,
         pu_location_id INT,
@@ -71,14 +71,13 @@ def create_tables(spark):
         tip_amount DECIMAL,
         tolls_amount DECIMAL,
         total_amount DECIMAL,
-        created_at TIMESTAMP,
-        updated_at TIMESTAMP,
+        created_at BIGINT,
+        updated_at BIGINT,
         __op STRING,
         __source_ts_ms BIGINT,
         __source_db STRING,
         __source_table STRING
     ) USING ICEBERG
-    PARTITIONED BY (day(pickup_datetime))
     TBLPROPERTIES (
         'write.format.default' = 'parquet',
         'write.parquet.compression-codec' = 'snappy',

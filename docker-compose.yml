@@ -369,9 +369,9 @@ services:
     ports:
       - "19120:19120"
     environment:
-      # Use in-memory storage for simplicity (use MongoDB/PostgreSQL for production)
       QUARKUS_PROFILE: prod
-      NESSIE_VERSION_STORE_TYPE: IN_MEMORY
+      NESSIE_VERSION_STORE_TYPE: ROCKSDB
+      NESSIE_VERSION_STORE_PERSIST_ROCKSDB_DATABASE_PATH: /nessie/data
       # S3 configuration for MinIO
       QUARKUS_S3_ENDPOINT_OVERRIDE: http://minio:9000
       QUARKUS_S3_PATH_STYLE_ACCESS: "true"
@@ -379,6 +379,8 @@ services:
       QUARKUS_S3_AWS_CREDENTIALS_TYPE: static
       QUARKUS_S3_AWS_CREDENTIALS_STATIC_PROVIDER_ACCESS_KEY_ID: admin
       QUARKUS_S3_AWS_CREDENTIALS_STATIC_PROVIDER_SECRET_ACCESS_KEY: password
+    volumes:
+      - nessie_data:/nessie/data
     depends_on:
       - minio-init
     healthcheck:
@@ -460,6 +462,7 @@ volumes:
   postgres_airflow_data:
   redis_data:
   minio_data:
+  nessie_data:
 
 networks:
   default:
