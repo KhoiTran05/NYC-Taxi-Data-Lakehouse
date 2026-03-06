@@ -81,8 +81,8 @@ def create_iceberg_table(spark):
     try:
         spark.sql(hourly_weather_ddl)
         logger.info("Iceberg table 'nessie.weather.hourly_weather' created successfully")
-    except Exception as e:
-        logger.exception(f"Error during creating 'nessie.weather.hourly_weather': {e}")
+    except Exception:
+        logger.exception("Error during creating 'nessie.weather.hourly_weather'")
         raise
     
 def process_weather_data(spark, input_path):

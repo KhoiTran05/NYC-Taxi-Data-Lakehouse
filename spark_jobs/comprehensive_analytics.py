@@ -86,7 +86,7 @@ def create_analytics_tables(spark):
         raise
     
     zone_performance_ddl = """
-        CREATE TABLE IF NOT EXISTS nessie.analytics.zone_performance_metrics (
+        CREATE TABLE IF NOT EXISTS nessie.analytics.zone_performance (
             location_id INT,
             zone_name STRING,
             borough STRING,
@@ -114,39 +114,6 @@ def create_analytics_tables(spark):
         logger.info("Iceberg table 'nessie.analytics.zone_performance' created successfullty")
     except Exception as e:
         logger.exception(f"Error during creating 'nessie.analytics.zone_performance': {e}")
-        raise
-    
-    demand_prediction_ddl = """
-        CREATE TABLE IF NOT EXISTS nessie.analytics.demand_prediction_features (
-            location_id INT,
-            prediction_datetime TIMESTAMP,
-            hour INT,
-            day_of_week INT,
-            is_weekend BOOLEAN,
-            temperature_celsius DOUBLE,
-            historical_demand_1h_ago BIGINT,
-            historical_demand_24h_ago BIGINT,
-            historical_demand_168h_ago BIGINT,
-            rolling_avg_demand_7d DOUBLE,
-            rolling_avg_demand_30d DOUBLE,
-            zone_type STRING,
-            is_tourist_area BOOLEAN,
-            is_business_district BOOLEAN,
-            weather_impact_factor DOUBLE,
-            load_date TIMESTAMP
-        ) USING ICEBERG
-        PARTITIONED BY (years(prediction_datetime), months(prediction_datetime))
-        TBLPROPERTIES (
-            "write.format.default"="parquet",
-            "write.parquet.compression-codec"="zstd"
-        )
-    """
-    
-    try:
-        spark.sql(demand_prediction_ddl)
-        logger.info("Iceberg table 'nessie.analytics.demand_prediction_features' created successfully")
-    except Exception as e:
-        logger.exception(f"Error during creating 'nessie.analytics.demand_prediction_features'")
         raise
     
 def process_trip_weather_correlation(spark, execution_datetime):
@@ -193,7 +160,7 @@ def process_trip_weather_correlation(spark, execution_datetime):
             current_timestamp() AS load_date
         FROM trips_hourly t
         LEFT JOIN weather_hourly w ON t.trip_date = w.weather_date AND t.hour = w.hour
-        GROUP BY trip_date, hour
+        GROUP BY t.trip_date, t.hour
     """
     
     logger.info("Creating trip weather correlation analytics")
@@ -230,7 +197,7 @@ def process_zone_performance(spark, execution_datetime):
                 do_location_id,
                 trip_distance,
                 fare_amount,
-                tip_amount,
+                tip_amount
             FROM nessie.nyc_taxi.trips
             WHERE pickup_datetime >= '{execution_datetime}'
         ),
@@ -269,7 +236,7 @@ def process_zone_performance(spark, execution_datetime):
             p.avg_fare_per_pickup,
             p.avg_tip_percentage,
             p.avg_trip_distance,
-            current_timestamp() AS load_date,
+            current_timestamp() AS load_date
         FROM pickup_metrics p
         LEFT JOIN dropoff_metrics d ON p.location_id = d.location_id 
             AND p.trip_date = d.trip_date AND p.hour = d.hour
@@ -287,97 +254,6 @@ def process_zone_performance(spark, execution_datetime):
         logger.exception(f"Error during writing into 'nessie.analytics.zone_performance': {e}")
         raise
     
-def process_demand_prediciton_features(spark, execution_datetime):
-    """Create features for demand prediction"""
-    demand_prediction_features_sql = f"""
-        WITH zones AS (
-            SELECT
-                location_id,
-                zone_type,
-                is_tourist_area,
-                is_business_district
-            FROM nessie.reference.taxi_zones
-        ),
-        demand_data AS (
-            SELECT
-                pu_location_id AS location_id,
-                DATE_TRUNC('hour', pickup_datetime) AS hour_timestamp,
-                COUNT(*) AS total_demands
-            FROM nessie.nyc_taxi.trips
-            WHERE pickup_datetime >= '{execution_datetime}' - INTERVAL 30 DAYS
-        ),
-        weather_data AS (
-            SELECT
-                DATE_TRUNC('hour', timestamp) AS hour_timestamp,
-                temperature_celsius,
-                rain_mm
-            FROM nessie.weather.hourly_weather
-            WHERE timestamp >= '{execution_datetime}' - INTERVAL 30 DAYS
-        )
-        SELECT
-            d.location_id,
-            d.hour_timestamp AS prediction_datetime,
-            hour(d.hour_timestamp) AS hour,
-            dayofweek(d.hour_timestamp) As day_of_week,
-            CASE 
-                WHEN dayofweek(d.hour_timestamp) IN (1, 7) THEN TRUE ELSE FALSE END 
-            AS is_weekend,
-            COALESCE(w.temperature_celsius, 0) AS temperature_celsius,
-            
-            LAG(d.total_demands, 1, 0) OVER (
-                PARTITION BY d.location_id 
-                ORDER BY d.hour_timestamp
-            ) AS historical_demand_1h_ago,
-            
-            LAG(d.total_demands, 24, 0) OVER (
-                PARTITION BY d.location_id 
-                ORDER BY d.hour_timestamp
-            ) AS historical_demand_24h_ago,
-            
-            LAG(d.total_demands, 168, 0) OVER (
-                PARTITION BY d.location_id 
-                ORDER BY d.hour_timestamp
-            ) AS historical_demand_168h_ago,
-            
-            AVG(d.total_demands) OVER (
-                PARTITION BY d.location_id
-                ORDER BY d.hour_timestamp
-                ROW BETWEENS 168 PRECEDING AND 1 PRECEDING
-            ) AS rolling_avg_demand_7d,
-            
-            AVG(d.total_demands) OVER (
-                PARTITION BY d.location_id
-                ORDER BY d.hour_timestamp
-                ROW BETWEENS 720 PRECEDING AND 1 PRECEDING
-            ) AS rolling_avg_demand_30d,
-            
-            z.zone_type,
-            z.is_tourist_area,
-            z.is_business_district,
-            CASE
-                WHEN w.rain_mm > 0 THEN 1.3
-                WHEN w.temperature_celsius < 0 THEN 1.2
-                WHEN w.temperature_celsius > 30 THEN 1.1
-                ELSE 1.0 
-            END as weather_impact_factor,
-            current_timestamp() AS load_date
-        FROM demand_data d
-        LEFT JOIN weather_data w ON d.hour_timestamp = w.hour_timestamp
-        LEFT JOIN zones z ON d.location_id = z.location_id
-        WHERE d.hour_timestamp >= '{execution_datetime}'
-    """
-    
-    logger.info("Creating demand prediction features analytics")
-    try:
-        demand_prediction_df = spark.sql(demand_prediction_features_sql)
-        
-        demand_prediction_df.writeTo("nessie.analytics.demand_prediction_features") \
-            .overwritePartitions()
-        logger.info("Writing successfully to 'nessie.analytics.demand_prediction_features'")
-    except Exception as e:
-        logger.exception(f"Error during writing into 'nessie.analytics.demand_prediction_features': {e}")
-        raise
-    
 def main():
     """Main fucnction"""
     spark = create_spark_session()
@@ -389,7 +265,6 @@ def main():
         
         process_trip_weather_correlation(spark, execution_datetime)
         process_zone_performance(spark, execution_datetime)
-        process_demand_prediciton_features(spark, execution_datetime)
         
         logger.info("Task completed successfully")
     except Exception as e:
