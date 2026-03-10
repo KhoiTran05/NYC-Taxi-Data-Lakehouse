@@ -155,7 +155,7 @@ def process_trip_cdc_stream(spark, schema):
     """Process CDC stream for trips data"""
     cdc_stream = spark.readStream \
         .format("kafka") \
-        .option("kakfa.bootstrap.server", "broker:29092") \
+        .option("kafka.bootstrap.server", "broker:29092") \
         .option("subscribe", "lakehouse.trips") \
         .option("startingOffsets", "latest") \
         .option("failOnDataLoss", "false") \
@@ -283,7 +283,7 @@ def main():
     spark.sparkContext.setLogLevel("WARN")
     
     try:
-        create_iceberg_tables()
+        create_iceberg_tables(spark)
         
         schema = get_trip_cdc_schema()
         trip_agg_query = process_trip_cdc_stream(spark, schema)
