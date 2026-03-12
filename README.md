@@ -69,7 +69,7 @@ docker-compose up -d
 This will start:
 - PostgreSQL database
 - MinIO object storage
-- Kafka & Zookeeper
+- Kafka
 - Kafka Connect (Debezium)
 - Apache Spark
 - Apache Airflow
