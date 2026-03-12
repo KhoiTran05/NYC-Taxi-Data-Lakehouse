@@ -2,7 +2,7 @@
 
 A modern data lakehouse built for analytics and machine learning on NYC taxi data combined with weather information. It integrates taxi trip data with weather conditions to enable powerful predictive analytics and insights.
 
-![Architecture](docs/image/architecture.png)
+![Architecture](docs/image/architecture_2.png)
 
 ## Overview
 
